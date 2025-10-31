@@ -1,1 +1,78 @@
+diff --git a/tests/test_resnet_training.py b/tests/test_resnet_training.py
+new file mode 100644
+index 0000000000000000000000000000000000000000..4f164f2c4415bf26fa9fb84a75ca86995af48986
+--- /dev/null
++++ b/tests/test_resnet_training.py
+@@ -0,0 +1,71 @@
++"""Tests for running a minimal ResNet training loop."""
++
++import pytest
++
++# Skip the entire module if PyTorch or torchvision are not available in the environment.
++torch = pytest.importorskip("torch")
++from torch import nn  # type: ignore[attr-defined]
++from torch.utils.data import DataLoader, Dataset  # type: ignore[attr-defined]
++
++torchvision = pytest.importorskip("torchvision")
++from torchvision.models import resnet18  # type: ignore[attr-defined]
++
++
++class RandomClassificationDataset(Dataset):
++    """A small dataset of random tensors and labels for quick tests."""
++
++    def __init__(self, num_samples: int, num_classes: int, input_size: int = 64) -> None:
++        super().__init__()
++        generator = torch.Generator().manual_seed(0)
++        self.images = torch.randn(num_samples, 3, input_size, input_size, generator=generator)
++        self.labels = torch.randint(0, num_classes, (num_samples,), generator=generator)
++
++    def __len__(self) -> int:  # pragma: no cover - simple alias
++        return len(self.labels)
++
++    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
++        return self.images[index], self.labels[index]
++
++
++def _train_resnet_for_steps(model: nn.Module, dataloader: DataLoader, steps: int) -> float:
++    model.train()
++    criterion = nn.CrossEntropyLoss()
++    optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.9)
++
++    loss_value = float("inf")
++    data_iter = iter(dataloader)
++
++    for _ in range(steps):
++        try:
++            inputs, targets = next(data_iter)
++        except StopIteration:  # pragma: no cover - defensive programming
++            data_iter = iter(dataloader)
++            inputs, targets = next(data_iter)
++
++        optimizer.zero_grad(set_to_none=True)
++        outputs = model(inputs)
++        loss = criterion(outputs, targets)
++        loss.backward()
++        optimizer.step()
++        loss_value = float(loss.detach().cpu())
++    return loss_value
++
++
++def test_resnet_training_updates_weights() -> None:
++    """Ensure a short ResNet training loop runs and updates weights."""
++
++    num_classes = 10
++    dataset = RandomClassificationDataset(num_samples=32, num_classes=num_classes)
++    dataloader = DataLoader(dataset, batch_size=8, shuffle=True)
++
++    model = resnet18(weights=None, num_classes=num_classes)
++
++    initial_weights = model.fc.weight.detach().clone()
++
++    final_loss = _train_resnet_for_steps(model, dataloader, steps=3)
++
++    assert torch.isfinite(torch.tensor(final_loss)), "Final loss should be a finite number."
++    assert not torch.equal(
++        initial_weights,
++        model.fc.weight.detach(),
++    ), "Weights of the classification head should change after training."
 
